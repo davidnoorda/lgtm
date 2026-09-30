@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 if [ ! -d web/node_modules ]; then (cd web && npm ci); fi
 if [ ! -d web/dist ]; then (cd web && npm run build); fi
-LGTM_PORT=3001 LGTM_NO_OPEN=1 cargo run --manifest-path server/Cargo.toml -- "${1:-.}" &
+LGTM_RUNTIME_DIR="${XDG_RUNTIME_DIR:?}/lgtm-dev" LGTM_PORT=3001 LGTM_NO_OPEN=1 cargo run --manifest-path server/Cargo.toml -- "${1:-.}" &
 backend=$!
 (cd web && npm run dev) &
 frontend=$!
