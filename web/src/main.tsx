@@ -29,15 +29,15 @@ function App() {
   const [selected, setSelected] = useState<string | null>(null);
   const [view, setView] = useState<View | null>(null);
   const [error, setError] = useState('');
-  const [comments, setComments] = useState<Comment[]>(() => { try { return JSON.parse(localStorage.getItem('readit-comments') || '[]'); } catch { return []; } });
-  const [note, setNote] = useState(() => localStorage.getItem('readit-note') || '');
+  const [comments, setComments] = useState<Comment[]>(() => { try { return JSON.parse(localStorage.getItem('lgtm-comments') || '[]'); } catch { return []; } });
+  const [note, setNote] = useState(() => localStorage.getItem('lgtm-note') || '');
   const [draft, setDraft] = useState<Draft | null>(null);
   const [selectedRange, setSelectedRange] = useState<SelectedLineRange | null>(null);
   const [text, setText] = useState('');
   const [style, setStyle] = useState<'unified' | 'split'>('unified');
   const current = useRef<View | null>(null);
-  useEffect(() => { localStorage.setItem('readit-comments', JSON.stringify(comments)); }, [comments]);
-  useEffect(() => { localStorage.setItem('readit-note', note); }, [note]);
+  useEffect(() => { localStorage.setItem('lgtm-comments', JSON.stringify(comments)); }, [comments]);
+  useEffect(() => { localStorage.setItem('lgtm-note', note); }, [note]);
   useEffect(() => {
     let active = true;
     async function refresh() {
@@ -109,7 +109,7 @@ function App() {
     const body = [note.trim(), ...reviewComments.map(c => `### ${c.path} — ${location(c.side, c.line, c.end ?? c.line)}${c.stale ? ' (possibly stale)' : ''}\n\n> ${(c.excerpt || '(blank line)').split('\n').join('\n> ')}\n\n${c.text}`)].filter(Boolean).join('\n\n');
     try { await navigator.clipboard.writeText(`Please address this review feedback (working changes against HEAD ${overview?.head ?? '?'}):\n\n${body}`); } catch (e) { setError(`Copy failed: ${e}`); }
   }
-  return <div className="app"><header><strong>readit</strong><span className="repo">{overview?.repo ?? 'Loading repository…'}</span><span className="mode">Working changes · HEAD {overview?.head}</span><button onClick={copy} disabled={!note.trim() && !reviewComments.length}>Copy feedback ({reviewComments.length})</button></header>
+  return <div className="app"><header><strong>LGTM</strong><span className="repo">{overview?.repo ?? 'Loading repository…'}</span><span className="mode">Working changes · HEAD {overview?.head}</span><button onClick={copy} disabled={!note.trim() && !reviewComments.length}>Copy feedback ({reviewComments.length})</button></header>
     {error && <div className="error">{error}</div>}
     <div className="layout"><aside><h3>Changed files <span>{overview?.files.length ?? 0}</span></h3><div className="tree">{overview && <Tree files={overview.files} selected={selected} onSelect={setSelected} />}</div></aside>
       <main><div className="filebar"><span>{selected ?? 'No changes'}</span><div><button onClick={() => setStyle('unified')} aria-pressed={style === 'unified'}>Unified</button><button onClick={() => setStyle('split')} aria-pressed={style === 'split'}>Split</button></div></div>

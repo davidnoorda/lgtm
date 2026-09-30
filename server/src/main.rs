@@ -191,11 +191,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/", get(|| frontend(Path(String::new()))))
         .route("/{*path}", get(frontend))
         .with_state(app);
-    let port = std::env::var("READIT_PORT").unwrap_or_else(|_| "0".into());
+    let port = std::env::var("LGTM_PORT").unwrap_or_else(|_| "0".into());
     let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{port}")).await?;
     let url = format!("http://{}", listener.local_addr()?);
-    println!("Readit: {url}");
-    if std::env::var("READIT_NO_OPEN").is_err() {
+    println!("LGTM: {url}");
+    if std::env::var("LGTM_NO_OPEN").is_err() {
         let _ = open::that(&url);
     }
     axum::serve(listener, router).await?;
