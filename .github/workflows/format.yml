@@ -1,4 +1,4 @@
-name: Formatting
+name: CI
 
 on:
   push:
@@ -8,7 +8,7 @@ permissions:
   contents: read
 
 jobs:
-  format:
+  validate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,3 +23,11 @@ jobs:
       - run: npm ci
         working-directory: web
       - run: make format-check
+      - name: Build frontend
+        run: npm run build
+        working-directory: web
+      - name: Run frontend and backend tests
+        run: make test
+      - name: Validate backend build
+        run: cargo build --locked
+        working-directory: server
