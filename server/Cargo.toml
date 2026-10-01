@@ -2,6 +2,7 @@
 name = "lgtm"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.89"
 
 [dependencies]
 axum = "0.8"
@@ -12,3 +13,6 @@ tower-http = { version = "0.6", features = ["fs"] }
 open = "5"
 include_dir = "0.7"
 mime_guess = "2"
+dirs = "6"
+getrandom = { version = "0.4", features = ["std"] }
+reqwest = { version = "0.12", default-features = false }

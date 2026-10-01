@@ -2,13 +2,12 @@ use super::*;
 
 #[tokio::test]
 async fn friendly_names_collisions_and_legacy_aliases() {
+    let mut nonce = [0u8; 16];
+    getrandom::fill(&mut nonce).unwrap();
     let root = std::env::temp_dir().join(format!(
-        "lgtm-slugs-{}-{}",
+        "lgtm-slugs-{}-{:x}",
         std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
+        u128::from_le_bytes(nonce)
     ));
     let first = root.join("one/My Project");
     let second = root.join("two/My Project");

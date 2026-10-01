@@ -1,3 +1,4 @@
+mod platform;
 #[cfg(test)]
 mod slug_tests;
 #[cfg(test)]
@@ -350,10 +351,13 @@ async fn frontend(Path(path): Path<String>) -> impl IntoResponse {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    use std::io::Read;
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.iter().any(|a| a == "--version" || a == "-V") {
+        println!("lgtm {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
     if args.iter().any(|a| a == "--help" || a == "-h") {
-        println!("Usage: lgtm [open] [PATH] [--changes]\n       lgtm serve\n\nOpens/registers a Git repository with the running local server.\nIf none is running, starts serving in the foreground. Requires curl.\nUse LGTM_PORT to choose a fixed port; LGTM_NO_OPEN=1 suppresses the browser.");
+        println!("Usage: lgtm [open] [PATH] [--changes]\n       lgtm serve\n\nOpens/registers a Git repository with the running local server.\nIf none is running, starts serving in the foreground. Requires Git.\nUse LGTM_PORT to choose a fixed port; LGTM_NO_OPEN=1 suppresses the browser.");
         return Ok(());
     }
     if args.iter().any(|a| a.starts_with("--") && a != "--changes") {
@@ -371,34 +375,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         "files"
     };
-    let runtime = PathBuf::from(
-        std::env::var("LGTM_RUNTIME_DIR").or_else(|_| std::env::var("XDG_RUNTIME_DIR"))?,
-    );
-    std::fs::create_dir_all(&runtime)?;
+    let runtime = platform::runtime_dir()?;
+    platform::create_private_dir(&runtime)?;
     let discovery = runtime.join("lgtm-server.json");
     let absolute = std::env::current_dir()?.join(&path);
     if !serving {
         if let Ok(bytes) = std::fs::read(&discovery) {
             if let Ok(info) = serde_json::from_slice::<serde_json::Value>(&bytes) {
                 if let (Some(url), Some(token)) = (info["url"].as_str(), info["token"].as_str()) {
-                    let response = Command::new("curl")
-                        .args([
-                            "--silent",
-                            "--show-error",
-                            "--fail",
-                            "--max-time",
-                            "3",
-                            "--noproxy",
-                            "*",
-                            "-H",
-                            &format!("Authorization: {token}"),
-                            "--data-binary",
-                            &absolute.to_string_lossy(),
-                            &format!("{url}/api/register"),
-                        ])
-                        .output()?;
-                    if response.status.success() {
-                        let id = String::from_utf8(response.stdout)?;
+                    // Discovery must never send the local token to a remote host.
+                    let parsed = reqwest::Url::parse(url)?;
+                    if parsed.scheme() != "http" || parsed.host_str() != Some("127.0.0.1") {
+                        return Err("Invalid local server URL".into());
+                    }
+                    let client = reqwest::Client::builder()
+                        .no_proxy()
+                        .redirect(reqwest::redirect::Policy::none())
+                        .timeout(std::time::Duration::from_secs(3))
+                        .build()?;
+                    if let Ok(response) = client
+                        .post(format!("{url}/api/register"))
+                        .header(header::AUTHORIZATION, token)
+                        .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
+                        .body(absolute.to_string_lossy().into_owned())
+                        .send()
+                        .await
+                    {
+                        // A live server rejecting registration must not start another server.
+                        if !response.status().is_success() {
+                            return Err(format!(
+                                "Repository registration failed: {}",
+                                response.text().await?
+                            )
+                            .into());
+                        }
+                        let id = response.text().await?;
                         let target = format!("{url}/r/{id}/{view}");
                         println!("{target}");
                         if std::env::var("LGTM_NO_OPEN").is_err() {
@@ -406,33 +417,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                         return Ok(());
                     }
-                    // Do not silently create another server if a live server rejected registration.
-                    if response.status.code() == Some(22) {
-                        return Err("Repository registration failed".into());
-                    }
                 }
             }
         }
     }
-    use std::os::unix::fs::OpenOptionsExt;
-    let server_lock = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .mode(0o600)
-        .open(runtime.join("lgtm-server.lock"))?;
+    let server_lock = platform::private_file(&runtime.join("lgtm-server.lock"), false)?;
     server_lock
         .try_lock()
         .map_err(|_| "LGTM is already running (or starting); try lgtm open again")?;
     let mut random = [0u8; 32];
-    std::fs::File::open("/dev/urandom")?.read_exact(&mut random)?;
+    getrandom::fill(&mut random)?;
     let token: String = random.iter().map(|b| format!("{b:02x}")).collect();
-    let state = std::env::var_os("XDG_STATE_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(std::env::var("HOME").unwrap()).join(".local/state"))
-        .join("lgtm");
-    std::fs::create_dir_all(&state)?;
+    let state = platform::state_dir()?;
+    platform::create_private_dir(&state)?;
     let registry = state.join("repositories.json");
     let repos = match std::fs::read(&registry) {
         Ok(bytes) => serde_json::from_slice(&bytes)?,
@@ -468,12 +465,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{port}")).await?;
     let url = format!("http://{}", listener.local_addr()?);
     use std::io::Write;
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(&discovery)?;
+    let mut file = platform::private_file(&discovery, true)?;
     file.write_all(
         serde_json::to_string(&serde_json::json!({"url": url, "token": token}))?.as_bytes(),
     )?;

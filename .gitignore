@@ -2,3 +2,5 @@ web/node_modules/
 web/dist/
 web/*.tsbuildinfo
 server/target/
+release/
+__pycache__/

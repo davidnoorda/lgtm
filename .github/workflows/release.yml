@@ -1,0 +1,133 @@
+name: Build and release
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.os }}-${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            os: linux
+            arch: x86_64
+            target: x86_64-unknown-linux-musl
+          - runner: ubuntu-24.04-arm
+            os: linux
+            arch: aarch64
+            target: aarch64-unknown-linux-musl
+          - runner: macos-15-intel
+            os: macos
+            arch: x86_64
+            target: x86_64-apple-darwin
+          - runner: macos-14
+            os: macos
+            arch: aarch64
+            target: aarch64-apple-darwin
+          - runner: windows-2022
+            os: windows
+            arch: x86_64
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+          components: rustfmt
+      - name: Install musl toolchain
+        if: matrix.os == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: Install and build frontend
+        run: |
+          cd web
+          npm ci
+          npm run build
+      - name: Validate formatting and frontend tests
+        run: |
+          cargo fmt --all --manifest-path server/Cargo.toml -- --check
+          cd web
+          npm run format:check
+          npm test
+      - name: Test and build native backend
+        env:
+          MACOSX_DEPLOYMENT_TARGET: '12.0'
+        run: |
+          cargo test --locked --manifest-path server/Cargo.toml --target '${{ matrix.target }}'
+          cargo build --locked --release --manifest-path server/Cargo.toml --target '${{ matrix.target }}'
+      - name: Smoke-test the packaged executable
+        run: python scripts/smoke-test.py 'server/target/${{ matrix.target }}/release/lgtm${{ matrix.os == 'windows' && '.exe' || '' }}'
+      - name: Package release
+        env:
+          RELEASE_OS: ${{ matrix.os }}
+          RELEASE_ARCH: ${{ matrix.arch }}
+          RELEASE_TARGET: ${{ matrix.target }}
+        run: |
+          version="$(python -c 'import tomllib; print("v" + tomllib.load(open("server/Cargo.toml", "rb"))["package"]["version"])')"
+          if [ "$GITHUB_REF_TYPE" = tag ]; then version="$GITHUB_REF_NAME"; fi
+          python scripts/package-release.py --version "$version" --target "$RELEASE_TARGET" --os "$RELEASE_OS" --arch "$RELEASE_ARCH"
+      - name: Test Unix installer
+        if: matrix.os != 'windows'
+        run: python scripts/test-install.py
+      - name: Test Windows installer
+        if: matrix.os == 'windows'
+        shell: powershell
+        run: ./scripts/test-install.ps1 -Binary "server/target/${{ matrix.target }}/release/lgtm.exe"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lgtm-${{ matrix.os }}-${{ matrix.arch }}
+          path: release/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Create draft GitHub release
+    needs: build
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: lgtm-*
+          merge-multiple: true
+          path: release
+      - name: Collect installers and checksums
+        run: |
+          cp scripts/install.sh scripts/install.ps1 release/
+          cd release
+          cat SHA256SUMS-*.txt | sort -k2 > SHA256SUMS
+          sha256sum install.sh install.ps1 >> SHA256SUMS
+          rm SHA256SUMS-*.txt
+          sha256sum --check SHA256SUMS
+      - name: Publish draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          flags=()
+          if [[ "$RELEASE_TAG" == *-* ]]; then flags+=(--prerelease); fi
+          gh release create "$RELEASE_TAG" release/* --verify-tag --draft --title "$RELEASE_TAG" --generate-notes "${flags[@]}"

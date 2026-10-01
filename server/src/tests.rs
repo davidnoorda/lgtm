@@ -1,16 +1,20 @@
 use super::*;
 
 fn fixture() -> (Arc<App>, PathBuf) {
+    let mut nonce = [0u8; 16];
+    getrandom::fill(&mut nonce).unwrap();
     let root = std::env::temp_dir().join(format!(
-        "lgtm-test-{}-{}",
+        "lgtm-test-{}-{:x}",
         std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
+        u128::from_le_bytes(nonce)
     ));
     std::fs::create_dir_all(&root).unwrap();
-    assert!(git(&root, &["init", "-q"]).unwrap().status.success());
+    let init = git(&root, &["init", "-q"]).unwrap();
+    assert!(
+        init.status.success(),
+        "{}",
+        String::from_utf8_lossy(&init.stderr)
+    );
     std::fs::write(root.join("hello.md"), "hello world\n").unwrap();
     std::fs::write(root.join(".gitignore"), "secret\n").unwrap();
     std::fs::write(root.join("secret"), "private").unwrap();
@@ -61,13 +65,17 @@ async fn registration_tree_and_contents() {
     std::fs::remove_dir_all(root).unwrap();
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn external_symlink_is_rejected() {
     let (app, root) = fixture();
-    std::os::unix::fs::symlink("/etc/passwd", root.join("escape")).unwrap();
+    let outside = root.with_extension("outside");
+    std::fs::write(&outside, "private").unwrap();
+    std::os::unix::fs::symlink(&outside, root.join("escape")).unwrap();
     let id = register(&app, root.to_str().unwrap()).unwrap();
     assert!(api_contents(State(app), Path((id, "escape".into())))
         .await
         .is_err());
     std::fs::remove_dir_all(root).unwrap();
+    std::fs::remove_file(outside).unwrap();
 }
