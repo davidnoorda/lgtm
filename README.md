@@ -32,4 +32,16 @@ Click or drag file/diff line numbers to select code and add a comment. Full-file
 
 Paste free text or Markdown source into the scratch editor, highlight any text, and add a comment. Annotations store the exact quote and character range, not line numbers. Edits outside a selection shift its range; edits touching the selected text mark the annotation as detached. “Show selection” highlights an attached annotation again. Markdown is currently edited as source, not rendered. Scratch documents and their annotations are browser-local; their URLs do not share the document across machines or browser profiles.
 
+## Development checks
+
+Install frontend dependencies with `cd web && npm ci`. Rust formatting requires rustfmt (`rustup component add rustfmt` when using rustup).
+
+```sh
+make format             # format web/ with Prettier and server/ with rustfmt
+make format-check       # check formatting without modifying files (also runs in CI)
+make test               # run frontend checks and Rust tests
+```
+
+Run these commands before submitting changes. Coding agents should follow `AGENTS.md`; editor format-on-save is optional. Prettier uses its defaults, with generated output and the npm lockfile excluded.
+
 `make test` type-checks the frontend and runs Rust tests. `LGTM_NO_OPEN=1` prevents automatic browser launch; `LGTM_PORT=3001` overrides the default random loopback port. `LGTM_RUNTIME_DIR` overrides the discovery directory, primarily for isolated development/testing.
