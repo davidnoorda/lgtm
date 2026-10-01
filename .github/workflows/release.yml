@@ -8,7 +8,45 @@ permissions:
   contents: read
 
 jobs:
+  validate:
+    name: Validate release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate tag matches package version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python - <<'PY'
+          import os
+          import tomllib
+
+          with open("server/Cargo.toml", "rb") as manifest:
+              expected = "v" + tomllib.load(manifest)["package"]["version"]
+          actual = os.environ["RELEASE_TAG"]
+          if actual != expected:
+              raise SystemExit(f"Release tag {actual!r} does not match package version {expected!r}")
+          PY
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: npm ci
+        working-directory: web
+      - run: make format-check
+      - name: Test frontend
+        run: npm test
+        working-directory: web
+
   build:
+    needs: validate
     name: ${{ matrix.os }}-${{ matrix.arch }}
     strategy:
       fail-fast: false
@@ -51,7 +89,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server -> target
+          key: ${{ matrix.target }}
       - name: Install musl toolchain
         if: matrix.os == 'linux'
         run: sudo apt-get update && sudo apt-get install -y musl-tools
@@ -60,12 +101,6 @@ jobs:
           cd web
           npm ci
           npm run build
-      - name: Validate formatting and frontend tests
-        run: |
-          cargo fmt --all --manifest-path server/Cargo.toml -- --check
-          cd web
-          npm run format:check
-          npm test
       - name: Test and build native backend
         env:
           MACOSX_DEPLOYMENT_TARGET: '12.0'
