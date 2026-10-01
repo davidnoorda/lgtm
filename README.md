@@ -96,7 +96,7 @@ Each persistent-data directory contains `repositories.json`. Older Linux builds 
 
 ## Publishing a release
 
-The `Build and release` workflow builds and tests all five native targets on pull requests, pushes to `main`/`master`, and manual runs. Only a pushed `v*` tag publishes a **draft** GitHub release, after every target passes. GitHub-hosted ARM runners require a public repository; private repositories may need compatible self-hosted runners or paid runner configuration.
+The `Build and release` workflow builds and tests all five native targets on pull requests, pushes to `main`, and manual runs. Only a pushed `v*` tag publishes a **draft** GitHub release, after every target passes. GitHub-hosted ARM runners require a public repository; private repositories may need compatible self-hosted runners or paid runner configuration.
 
 1. Set the version in `server/Cargo.toml`, update `server/Cargo.lock` with `cargo check --manifest-path server/Cargo.toml`, and commit it with your changes.
 2. Run `make format`, `make format-check`, and `make test` locally.
