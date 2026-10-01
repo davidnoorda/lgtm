@@ -13,15 +13,24 @@ import type {
   SelectedLineRange,
 } from "@pierre/diffs";
 import { FileTree, useFileTree } from "@pierre/trees/react";
+import type { GitStatusEntry } from "@pierre/trees";
+import {
+  invalidateUnavailableComments,
+  keyFor,
+  parseRepositoryRoute,
+  repositoryFiles,
+  repositoryURL,
+  syncTreeSelection,
+  updateCommentFreshness,
+} from "./repository";
+import type { Entry, View } from "./repository";
 import "./style.css";
 import { Scratch } from "./Scratch";
 
-type Entry = { path: string; status: string };
-type Overview = { repo: string; head: string; files: Entry[] };
-type View = { path: string; old: string | null; new: string | null };
+type Overview = { repo: string; head: string; files: GitStatusEntry[] };
 type Side = "additions" | "deletions";
 type Comment = {
-  mode?: string;
+  mode: "files" | "changes";
   id: string;
   repo: string;
   path: string;
@@ -43,25 +52,28 @@ const get = async <T,>(url: string): Promise<T> => {
   return r.json();
 };
 const lines = (text: string | null) => text?.split("\n") ?? [];
-const keyFor = (view: View) => JSON.stringify([view.old, view.new]);
 function Tree({
   files,
+  gitStatus,
   selected,
   onSelect,
 }: {
   files: Entry[];
+  gitStatus: GitStatusEntry[];
   selected: string | null;
   onSelect: (path: string) => void;
 }) {
   const paths = useMemo(() => files.map((f) => f.path), [files]);
   // useFileTree creates its model once and retains the initial callback.
   // Read current props instead of capturing the initial repository view.
+  const syncing = useRef(false);
   const selection = useRef({ files, selected, onSelect });
   selection.current = { files, selected, onSelect };
   const onSelectionChange = useCallback((paths: readonly string[]) => {
     const path = paths[0];
     const current = selection.current;
     if (
+      !syncing.current &&
       path &&
       path !== current.selected &&
       current.files.some((f) => f.path === path)
@@ -70,58 +82,61 @@ function Tree({
   }, []);
   const { model } = useFileTree({
     paths,
+    gitStatus,
     initialExpansion: "open",
     flattenEmptyDirectories: true,
     onSelectionChange,
   });
   useEffect(() => {
-    model.resetPaths(paths);
+    syncing.current = true;
+    try {
+      model.resetPaths(paths);
+    } finally {
+      syncing.current = false;
+    }
   }, [model, paths]);
   useEffect(() => {
-    if (selected) model.getItem(selected)?.select();
-  }, [model, selected]);
+    model.setGitStatus(gitStatus);
+  }, [model, gitStatus]);
+  useEffect(() => {
+    syncing.current = true;
+    try {
+      syncTreeSelection(model, selected);
+    } finally {
+      syncing.current = false;
+    }
+  }, [model, paths, selected]);
   return <FileTree model={model} />;
 }
 function navigate(url: string, replace = false) {
-  if (window.location.pathname === url) return;
+  if (`${window.location.pathname}${window.location.search}` === url) return;
   window.history[replace ? "replaceState" : "pushState"]({}, "", url);
   window.dispatchEvent(new PopStateEvent("popstate"));
 }
 function App({
   id,
-  mode,
   path,
+  changedOnly,
+  fullFile,
 }: {
   id: string;
-  mode: string;
   path: string | null;
+  changedOnly: boolean;
+  fullFile: boolean;
 }) {
   const api = `/api/r/${id}`;
-  const viewURLs = useRef<Record<string, string>>({});
-  useEffect(() => {
-    viewURLs.current[mode] = window.location.pathname;
-  }, [mode, path]);
-  const switchView = (next: string) => {
-    if (next !== mode) navigate(viewURLs.current[next] || `/r/${id}/${next}`);
-  };
   const select = useCallback(
-    (p: string) =>
-      navigate(
-        `/r/${id}/${mode}/${p.split("/").map(encodeURIComponent).join("/")}`,
-      ),
-    [id, mode],
+    (p: string) => navigate(repositoryURL(id, p, { changedOnly })),
+    [id, changedOnly],
   );
   const [overview, setOverview] = useState<Overview | null>(null);
+  const [files, setFiles] = useState<Entry[]>([]);
   const [selected, setSelected] = useState<string | null>(path);
   const [view, setView] = useState<View | null>(null);
   const [error, setError] = useState("");
   const [comments, setComments] = useState<Comment[]>(() => {
     try {
-      return JSON.parse(
-        localStorage.getItem(`lgtm-comments:${id}`) ||
-          localStorage.getItem("lgtm-comments") ||
-          "[]",
-      );
+      return JSON.parse(localStorage.getItem(`lgtm-comments:${id}`) || "[]");
     } catch {
       return [];
     }
@@ -149,11 +164,19 @@ function App({
     let active = true;
     async function refresh() {
       try {
-        const next = await get<Overview>(api + "/overview");
-        if (mode === "files") next.files = await get<Entry[]>(api + "/tree");
+        const [next, tree] = await Promise.all([
+          get<Overview>(api + "/overview"),
+          get<Entry[]>(api + "/tree"),
+        ]);
         if (!active) return;
         setOverview((prev) =>
           JSON.stringify(prev) === JSON.stringify(next) ? prev : next,
+        );
+        setFiles((prev) =>
+          JSON.stringify(prev) === JSON.stringify(tree) ? prev : tree,
+        );
+        setComments((cs) =>
+          invalidateUnavailableComments(cs, next.repo, tree, next.files),
         );
         setError("");
       } catch (e) {
@@ -166,42 +189,44 @@ function App({
       active = false;
       clearInterval(timer);
     };
-  }, [api, mode]);
+  }, [api]);
+  const change = overview?.files.find((file) => file.path === selected);
+  const isChanged = !!change;
+  const fileMode =
+    isChanged && (!fullFile || change.status === "deleted")
+      ? "changes"
+      : "files";
+  const allFiles = useMemo(
+    () => repositoryFiles(files, overview?.files ?? []),
+    [files, overview?.files],
+  );
+  const visibleFiles = changedOnly ? (overview?.files ?? []) : allFiles;
+  const setChangedOnly = (value: boolean) =>
+    navigate(repositoryURL(id, selected, { changedOnly: value, fullFile }));
+  const setFullFile = (value: boolean) =>
+    navigate(repositoryURL(id, selected, { changedOnly, fullFile: value }));
   useEffect(() => {
-    if (!selected) {
+    if (!selected || !overview) {
       setView(null);
       current.current = null;
       return;
     }
     const path = selected;
+    const repo = overview.repo;
     let active = true;
     async function refresh() {
       try {
-        const next = await get<View>(
+        const snapshot = await get<View>(
           api +
-            (mode === "files" ? "/contents/" : "/file/") +
+            (isChanged ? "/file/" : "/contents/") +
             path.split("/").map(encodeURIComponent).join("/"),
         );
         if (!active) return;
+        const next =
+          fileMode === "files" ? { ...snapshot, old: null } : snapshot;
         const previous = current.current;
         setComments((cs) =>
-          cs.some(
-            (c) =>
-              (c.mode ?? "changes") === mode &&
-              c.repo === overview?.repo &&
-              c.path === next.path &&
-              !c.stale &&
-              c.version !== keyFor(next),
-          )
-            ? cs.map((c) =>
-                (c.mode ?? "changes") === mode &&
-                c.repo === overview?.repo &&
-                c.path === next.path &&
-                c.version !== keyFor(next)
-                  ? { ...c, stale: true }
-                  : c,
-              )
-            : cs,
+          updateCommentFreshness(cs, repo, snapshot, isChanged),
         );
         if (previous?.path === next.path && keyFor(previous) !== keyFor(next)) {
           setDraft(null);
@@ -228,7 +253,7 @@ function App({
       active = false;
       clearInterval(timer);
     };
-  }, [selected, overview?.repo, api, mode]);
+  }, [selected, overview?.repo, api, isChanged, fileMode]);
   const oldFile = useMemo<FileContents | null>(
     () => (view?.old == null ? null : { name: view.path, contents: view.old }),
     [view],
@@ -242,7 +267,7 @@ function App({
       ...comments
         .filter(
           (c) =>
-            (c.mode ?? "changes") === mode &&
+            c.mode === fileMode &&
             c.repo === overview?.repo &&
             c.path === selected &&
             !c.stale,
@@ -262,7 +287,7 @@ function App({
           ]
         : []),
     ],
-    [comments, selected, overview?.repo, draft, mode],
+    [comments, selected, overview?.repo, draft, fileMode],
   );
   const renderAnnotation = useCallback(
     (annotation: DiffLineAnnotation<Annotation>) =>
@@ -323,7 +348,7 @@ function App({
       onGutterUtilityClick: (range: SelectedLineRange) =>
         setSelectedRange(range),
       onLineSelectionEnd: (range: SelectedLineRange | null) => {
-        if (!range || !selected || (mode === "changes" && !range.side)) {
+        if (!range || !selected || (fileMode === "changes" && !range.side)) {
           setSelectedRange(null);
           return;
         }
@@ -339,7 +364,7 @@ function App({
         setText("");
       },
     }),
-    [style, selected, draft, mode],
+    [style, selected, draft, fileMode],
   );
   function save() {
     if (!view || !draft || !text.trim()) return;
@@ -350,7 +375,7 @@ function App({
     setComments((cs) => [
       ...cs,
       {
-        mode,
+        mode: fileMode,
         id: crypto.randomUUID(),
         repo: overview?.repo ?? "",
         path: view.path,
@@ -373,7 +398,7 @@ function App({
       note.trim(),
       ...reviewComments.map(
         (c) =>
-          `### ${c.path} (${c.mode ?? "changes"}) — ${location(c.side, c.line, c.end ?? c.line)}${c.stale ? " (possibly stale)" : ""}\n\n> ${(c.excerpt || "(blank line)").split("\n").join("\n> ")}\n\n${c.text}`,
+          `### ${c.path} (${c.mode}) — ${location(c.side, c.line, c.end ?? c.line)}${c.stale ? " (possibly stale)" : ""}\n\n> ${(c.excerpt || "(blank line)").split("\n").join("\n> ")}\n\n${c.text}`,
       ),
     ]
       .filter(Boolean)
@@ -393,18 +418,6 @@ function App({
         <span className="repo">{overview?.repo ?? "Loading repository…"}</span>
         <nav className="view-nav" aria-label="Views">
           <button onClick={() => navigate("/")}>Repositories</button>
-          <button
-            aria-pressed={mode === "files"}
-            onClick={() => switchView("files")}
-          >
-            Files
-          </button>
-          <button
-            aria-pressed={mode === "changes"}
-            onClick={() => switchView("changes")}
-          >
-            Changes
-          </button>
           <button onClick={() => navigate("/scratch/new")}>Scratch</button>
         </nav>
         <span className="mode">HEAD {overview?.head}</span>
@@ -419,13 +432,21 @@ function App({
       <div className="layout">
         <aside>
           <h3>
-            {mode === "files" ? "Files" : "Changed files"}{" "}
-            <span>{overview?.files.length ?? 0}</span>
+            Files <span>{visibleFiles.length}</span>
           </h3>
+          <label className="tree-filter">
+            <input
+              type="checkbox"
+              checked={changedOnly}
+              onChange={(e) => setChangedOnly(e.target.checked)}
+            />{" "}
+            Changed only <span>{overview?.files.length ?? 0}</span>
+          </label>
           <div className="tree">
             {overview && (
               <Tree
-                files={overview.files}
+                files={visibleFiles}
+                gitStatus={overview.files}
                 selected={selected}
                 onSelect={select}
               />
@@ -435,29 +456,47 @@ function App({
         <main>
           <div className="filebar">
             <span>{selected ?? "Select a file"}</span>
-            {mode === "changes" && (
-              <div>
-                <button
-                  onClick={() => setStyle("unified")}
-                  aria-pressed={style === "unified"}
-                >
-                  Unified
-                </button>
-                <button
-                  onClick={() => setStyle("split")}
-                  aria-pressed={style === "split"}
-                >
-                  Split
-                </button>
-              </div>
-            )}
+            <div>
+              {isChanged && change.status !== "deleted" && (
+                <>
+                  <button
+                    onClick={() => setFullFile(false)}
+                    aria-pressed={fileMode === "changes"}
+                  >
+                    Diff
+                  </button>
+                  <button
+                    onClick={() => setFullFile(true)}
+                    aria-pressed={fileMode === "files"}
+                  >
+                    Full file
+                  </button>
+                </>
+              )}
+              {fileMode === "changes" && (
+                <>
+                  <button
+                    onClick={() => setStyle("unified")}
+                    aria-pressed={style === "unified"}
+                  >
+                    Unified
+                  </button>
+                  <button
+                    onClick={() => setStyle("split")}
+                    aria-pressed={style === "split"}
+                  >
+                    Split
+                  </button>
+                </>
+              )}
+            </div>
           </div>
           {view ? (
             <>
               <p className="hint">
                 Click or drag line numbers to select lines and leave a comment.
               </p>
-              {mode === "files" && newFile ? (
+              {fileMode === "files" && newFile ? (
                 <File<Annotation>
                   file={newFile}
                   options={options}
@@ -536,11 +575,13 @@ function App({
                 />
                 <div>
                   <button
-                    onClick={() => {
+                    onClick={() =>
                       navigate(
-                        `/r/${id}/${c.mode ?? "changes"}/${c.path.split("/").map(encodeURIComponent).join("/")}`,
-                      );
-                    }}
+                        repositoryURL(id, c.path, {
+                          fullFile: c.mode === "files",
+                        }),
+                      )
+                    }
                   >
                     Open file
                   </button>
@@ -590,9 +631,12 @@ function Home() {
   );
 }
 function Router() {
-  const [url, setUrl] = useState(window.location.pathname);
+  const [url, setUrl] = useState(
+    `${window.location.pathname}${window.location.search}`,
+  );
   useEffect(() => {
-    const update = () => setUrl(window.location.pathname);
+    const update = () =>
+      setUrl(`${window.location.pathname}${window.location.search}`);
     window.addEventListener("popstate", update);
     return () => window.removeEventListener("popstate", update);
   }, []);
@@ -605,16 +649,8 @@ function Router() {
       sessionStorage.setItem("lgtm-last-repository", url);
     }
   }, [url]);
-  const match = url.match(/^\/r\/([^/]+)\/(files|changes)(?:\/(.*))?$/);
-  if (match)
-    return (
-      <App
-        key={match[1]}
-        id={match[1]}
-        mode={match[2]}
-        path={match[3] ? decodeURIComponent(match[3]) : null}
-      />
-    );
+  const route = parseRepositoryRoute(url);
+  if (route) return <App key={route.id} {...route} />;
   if (/^\/scratch\/[^/]+$/.test(url))
     return (
       <Scratch

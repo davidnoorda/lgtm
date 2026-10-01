@@ -366,8 +366,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .next()
         .cloned()
         .unwrap_or_else(|| ".".into());
-    let mode = if args.iter().any(|a| a == "--changes") {
-        "changes"
+    let view = if args.iter().any(|a| a == "--changes") {
+        "files?changed=1"
     } else {
         "files"
     };
@@ -399,7 +399,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .output()?;
                     if response.status.success() {
                         let id = String::from_utf8(response.stdout)?;
-                        let target = format!("{url}/r/{id}/{mode}");
+                        let target = format!("{url}/r/{id}/{view}");
                         println!("{target}");
                         if std::env::var("LGTM_NO_OPEN").is_err() {
                             open::that(target)?;
@@ -478,7 +478,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         serde_json::to_string(&serde_json::json!({"url": url, "token": token}))?.as_bytes(),
     )?;
     let target = initial
-        .map(|id| format!("{url}/r/{id}/{mode}"))
+        .map(|id| format!("{url}/r/{id}/{view}"))
         .unwrap_or_else(|| format!("{url}/scratch/new"));
     println!("LGTM: {target}");
     if std::env::var("LGTM_NO_OPEN").is_err() {

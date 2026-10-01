@@ -8,8 +8,8 @@ make dev                 # open http://127.0.0.1:5173; select a registered repo
 make build               # builds server/target/release/lgtm with embedded UI
 
 lgtm serve               # start the local server in the foreground
-lgtm open .              # register this repo and open its Files view
-lgtm open /another/repo --changes
+lgtm open .              # register this repo and open its repository view
+lgtm open /another/repo --changes  # open with Changed only enabled
 lgtm .                   # shorthand for open; starts serving if none is running
 ```
 
@@ -18,15 +18,15 @@ Use `server/target/release/lgtm` in place of `lgtm` if it isn't on your PATH. If
 ## Views and URLs
 
 - `/` — registered repositories.
-- `/r/:id/files` — full repository tree, including tracked and untracked non-ignored files.
-- `/r/:id/files/path/to/file` — full-file annotation.
-- `/r/:id/changes` — staged, unstaged and untracked working changes against HEAD.
-- `/r/:id/changes/path/to/file` — specific working diff.
+- `/r/:id/files` — repository tree with Git status, including tracked, untracked non-ignored, and deleted paths.
+- `/r/:id/files?changed=1` — the same tree filtered to staged, unstaged and untracked working changes against HEAD.
+- `/r/:id/files/path/to/file` — a working diff for a changed file, otherwise full-file contents.
+- `/r/:id/files/path/to/file?view=file` — full-file contents and annotations; changed files also have Diff / Full file buttons.
 - `/scratch/new` — creates a browser-local scratch document and replaces the URL with `/scratch/:id`.
 
 Deep links, refresh and browser back/forward are supported. Use a fixed `LGTM_PORT` if you want bookmarks to survive server restarts. Branch comparisons are not implemented yet.
 
-Click or drag file/diff line numbers to select code and add a comment. Full-file and diff annotations have separate coordinates. Edit or delete comments in the review panel; copy feedback to paste into an agent. The UI polls Git every two seconds. Comments on modified files are flagged as potentially stale, not silently relocated. Drafts are stored in browser localStorage, scoped by repository ID. Text files only; ignored files are excluded and paths outside registered repositories are rejected. No repository files or commits are modified.
+Click or drag file/diff line numbers to select code and add a comment. Full-file and diff annotations have separate coordinates. Opening a full-file comment selects Full file even when the file has changes. Comments whose diff is no longer available (for example, after a commit) remain in the review panel and are flagged as potentially stale. Edit or delete comments in the review panel; copy feedback to paste into an agent. The UI polls Git every two seconds. Comments on modified files are flagged as potentially stale, not silently relocated. Drafts are stored in browser localStorage, scoped by repository ID. Text files only; ignored files are excluded and paths outside registered repositories are rejected. No repository files or commits are modified.
 
 ## Scratch
 
@@ -44,4 +44,4 @@ make test               # run frontend checks and Rust tests
 
 Run these commands before submitting changes. Coding agents should follow `AGENTS.md`; editor format-on-save is optional. Prettier uses its defaults, with generated output and the npm lockfile excluded.
 
-`make test` type-checks the frontend and runs Rust tests. `LGTM_NO_OPEN=1` prevents automatic browser launch; `LGTM_PORT=3001` overrides the default random loopback port. `LGTM_RUNTIME_DIR` overrides the discovery directory, primarily for isolated development/testing.
+`make test` type-checks the frontend and runs repository-view regression tests and Rust tests. `LGTM_NO_OPEN=1` prevents automatic browser launch; `LGTM_PORT=3001` overrides the default random loopback port. `LGTM_RUNTIME_DIR` overrides the discovery directory, primarily for isolated development/testing.
