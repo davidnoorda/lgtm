@@ -11,7 +11,7 @@ try {
     New-Item -ItemType Directory -Path $temp | Out-Null
     $asset = "lgtm-$version-windows-x86_64.zip"
     $fixture = Join-Path $temp $asset
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
     $zip = [IO.Compression.ZipFile]::Open($fixture, [IO.Compression.ZipArchiveMode]::Create)
     try { [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $Binary, 'lgtm.exe') | Out-Null } finally { $zip.Dispose() }
     $checksum = (Get-FileHash $fixture -Algorithm SHA256).Hash.ToLowerInvariant() + '  ' + $asset

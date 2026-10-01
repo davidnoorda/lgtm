@@ -32,7 +32,7 @@ try {
     $expected = $lines[0].Substring(0, 64)
     $actual = (Get-FileHash -Algorithm SHA256 -Path (Join-Path $temp $asset)).Hash
     if ($actual -ine $expected) { throw 'Checksum mismatch; existing installation unchanged.' }
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
     $archive = [IO.Compression.ZipFile]::OpenRead((Join-Path $temp $asset))
     try {
         $entries = @($archive.Entries | Where-Object { $_.FullName -ceq 'lgtm.exe' })
