@@ -5,6 +5,8 @@ $root = Split-Path $PSScriptRoot -Parent
 $Binary = (Resolve-Path $Binary).Path
 $fixtureVersion = 'v' + ((& $Binary --version) -replace '^lgtm ', '')
 $temp = Join-Path ([IO.Path]::GetTempPath()) ('lgtm-installer-test-' + [Guid]::NewGuid())
+$originalRepo = $env:LGTM_REPO
+$originalInstallDir = $env:LGTM_INSTALL_DIR
 $originalPath = $env:Path
 $originalUserPath = [Environment]::GetEnvironmentVariable('Path', 'User')
 try {
@@ -16,15 +18,16 @@ try {
     try { [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $Binary, 'lgtm.exe') | Out-Null } finally { $zip.Dispose() }
     $checksum = (Get-FileHash $fixture -Algorithm SHA256).Hash.ToLowerInvariant() + '  ' + $asset
     $failureMode = ''
+    $fixtureRepo = 'test/lgtm'
     # Shadow HTTP cmdlets so the real installer runs entirely offline.
     function Invoke-RestMethod {
         param($Uri, $Headers)
-        if ($Uri -ne 'https://api.github.com/repos/test/lgtm/releases/latest') { throw "Unexpected URL: $Uri" }
+        if ($Uri -ne "https://api.github.com/repos/$fixtureRepo/releases/latest") { throw "Unexpected URL: $Uri" }
         return @{ tag_name = $fixtureVersion }
     }
     function Invoke-WebRequest {
         param([switch]$UseBasicParsing, $Uri, $OutFile)
-        if (-not $Uri.StartsWith("https://github.com/test/lgtm/releases/download/$fixtureVersion/")) { throw "Unexpected URL: $Uri" }
+        if (-not $Uri.StartsWith("https://github.com/$fixtureRepo/releases/download/$fixtureVersion/")) { throw "Unexpected URL: $Uri" }
         if ($failureMode -eq 'download') { throw 'Simulated download failure' }
         if ($Uri.EndsWith('/SHA256SUMS')) {
             if ($failureMode -eq 'missing') { Set-Content -Path $OutFile -Value '' } else { Set-Content -Path $OutFile -Value $checksum }
@@ -35,7 +38,12 @@ try {
         }
     }
     $destination = Join-Path $temp 'installation with spaces'
-    & "$PSScriptRoot/install.ps1" -Repo 'test/lgtm' -InstallDir $destination -AddToPath
+    # Exercise the documented Invoke-Expression invocation with default repo and PATH behavior.
+    $fixtureRepo = 'davidnoorda/lgtm'
+    $env:LGTM_REPO = $null
+    $env:LGTM_INSTALL_DIR = $destination
+    Invoke-Expression (Get-Content -Raw "$PSScriptRoot/install.ps1")
+    $fixtureRepo = 'test/lgtm'
     & "$PSScriptRoot/install.ps1" -Repo 'test/lgtm' -Version $fixtureVersion -InstallDir $destination -AddToPath
     if (@(([Environment]::GetEnvironmentVariable('Path', 'User') -split ';') | Where-Object { $_ -eq $destination }).Count -ne 1) { throw 'PATH entry was not added exactly once' }
     $installed = Join-Path $destination 'lgtm.exe'
@@ -49,6 +57,8 @@ try {
     }
     Write-Output 'Windows installer tests passed'
 } finally {
+    $env:LGTM_REPO = $originalRepo
+    $env:LGTM_INSTALL_DIR = $originalInstallDir
     $env:Path = $originalPath
     [Environment]::SetEnvironmentVariable('Path', $originalUserPath, 'User')
     if (Test-Path $temp) { Remove-Item -Recurse -Force $temp }

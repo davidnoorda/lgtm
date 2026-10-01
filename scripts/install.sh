@@ -2,11 +2,11 @@
 set -euo pipefail
 
 usage() {
-  printf '%s\n' 'Usage: install.sh --repo OWNER/REPO [--version vX.Y.Z] [--dir PATH]' \
-    'Defaults: latest published release; ~/.local/bin. Requires Git, curl and tar.'
+  printf '%s\n' 'Usage: install.sh [--repo OWNER/REPO] [--version vX.Y.Z] [--dir PATH]' \
+    'Defaults: davidnoorda/lgtm; latest published release; ~/.local/bin. Requires Git, curl and tar.'
 }
 fail() { printf 'Error: %s\n' "$*" >&2; exit 1; }
-repo="${LGTM_REPO:-}"
+repo="${LGTM_REPO:-davidnoorda/lgtm}"
 version=latest
 install_dir="${LGTM_INSTALL_DIR:-$HOME/.local/bin}"
 while [ "$#" -gt 0 ]; do

@@ -1,10 +1,10 @@
 #Requires -Version 5.1
 [CmdletBinding()]
 param(
-    [string]$Repo = $env:LGTM_REPO,
+    [string]$Repo = $(if ($env:LGTM_REPO) { $env:LGTM_REPO } else { 'davidnoorda/lgtm' }),
     [string]$Version = 'latest',
     [string]$InstallDir = $(if ($env:LGTM_INSTALL_DIR) { $env:LGTM_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA 'Programs\lgtm\bin' }),
-    [switch]$AddToPath
+    [switch]$AddToPath = $true
 )
 $ErrorActionPreference = 'Stop'
 if ($env:OS -ne 'Windows_NT') { throw 'This installer supports Windows. Use install.sh on Linux/macOS.' }

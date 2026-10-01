@@ -6,15 +6,12 @@ Local, read-only repository review. Rust backend, React UI, Pierre Diffs and Tre
 
 Releases support Linux and macOS 12+ (x86_64 and ARM64), and Windows 10+ (x86_64). Linux binaries use musl, avoiding a dependency on a particular glibc version. Windows builds statically link the C runtime, so no Visual C++ redistributable is needed. Install Git first; no Rust or Node installation is needed.
 
-Releases are hosted at [davidnoorda/lgtm](https://github.com/davidnoorda/lgtm). The installers download public release assets without authentication; for a private repository, download manually using authenticated GitHub access. Download the installer from a **published release**, inspect it, then run it:
+Releases are hosted at [davidnoorda/lgtm](https://github.com/davidnoorda/lgtm). These commands download and execute the installer from the latest published release; only run them if you trust this repository.
 
 ### Linux / macOS
 
 ```sh
-curl --proto '=https' --tlsv1.2 -fsSL -o install.sh https://github.com/davidnoorda/lgtm/releases/latest/download/install.sh
-bash install.sh --repo davidnoorda/lgtm
-# Pin a release or choose another directory:
-bash install.sh --repo davidnoorda/lgtm --version v0.1.0 --dir "$HOME/.local/bin"
+curl -fsSL https://github.com/davidnoorda/lgtm/releases/latest/download/install.sh | bash
 ```
 
 The default directory is `~/.local/bin`. The installer prints a PATH reminder if needed; it does not edit shell configuration. Requires curl, tar, and either sha256sum (Linux) or shasum (macOS).
@@ -22,19 +19,14 @@ The default directory is `~/.local/bin`. The installer prints a PATH reminder if
 ### Windows (PowerShell)
 
 ```powershell
-Invoke-WebRequest -UseBasicParsing https://github.com/davidnoorda/lgtm/releases/latest/download/install.ps1 -OutFile install.ps1
-# Review install.ps1 before running it. If local execution policy requires it:
-Unblock-File ./install.ps1
-./install.ps1 -Repo davidnoorda/lgtm -AddToPath
-# Pin a release or choose another directory:
-./install.ps1 -Repo davidnoorda/lgtm -Version v0.1.0 -InstallDir "$env:LOCALAPPDATA\Programs\lgtm\bin"
+irm https://github.com/davidnoorda/lgtm/releases/latest/download/install.ps1 | iex
 ```
 
-Requires Windows PowerShell 5.1+ and Git for Windows on PATH. The default directory is `%LOCALAPPDATA%\Programs\lgtm\bin`. `-AddToPath` updates the current session and the user PATH for future terminals; it never changes the system PATH. If your local policy blocks scripts, run the reviewed, unblocked installer in a new process with `powershell -NoProfile -ExecutionPolicy RemoteSigned -File ./install.ps1 -Repo davidnoorda/lgtm -AddToPath`, then open a new terminal. This does not change the permanent execution policy; organization policies may still require administrator approval.
+Requires Windows PowerShell 5.1+ and Git for Windows on PATH. The default directory is `%LOCALAPPDATA%\Programs\lgtm\bin`. The installer updates the current session and the user PATH for future terminals; it never changes the system PATH or execution policy. Organization policies may restrict execution of downloaded code.
 
 Both installers verify the archive against the release's `SHA256SUMS`, check the executable's version, and stage it before replacing an existing installation. Close a running instance before upgrading, especially on Windows. `LGTM_REPO` and `LGTM_INSTALL_DIR` can supply defaults. Latest means the latest published non-prerelease; prereleases require an explicit version.
 
-Alternatively, download the matching archive and `SHA256SUMS`, verify the archive's SHA-256, extract `lgtm`/`lgtm.exe`, and put it on PATH. Checksums detect corrupted downloads but are not signatures; use releases from a repository you trust. Initial releases are unsigned and not notarized, so OS security warnings are possible.
+Checksums detect corrupted downloads but do not independently authenticate the installer or release. Initial releases are unsigned and not notarized, so OS security warnings are possible.
 
 To uninstall, remove the executable and any PATH entry you added. Your saved repositories and browser-local annotations are retained.
 
@@ -103,6 +95,6 @@ The `Build and release` workflow builds and tests all five native targets on pul
 3. Push the commit and a matching tag (for example, `git tag v0.1.0 && git push origin v0.1.0`). The tag must match the Cargo package version; prerelease tags such as `v0.2.0-beta.1` are supported.
 4. Review the draft release and its generated notes, download and try the binaries, then publish it. Installers cannot access draft release assets. Tags containing a prerelease suffix create a prerelease draft.
 
-Assets are named `lgtm-v<version>-<linux|macos|windows>-<x86_64|aarch64>.<tar.gz|zip>`. Releases include both installers and a combined `SHA256SUMS`. Manual/branch builds upload the same packages as workflow artifacts without publishing a release. Signing, notarization, Homebrew, and WinGet distribution are not yet configured.
+Assets are named `lgtm-v<version>-<linux|macos|windows>-<x86_64|aarch64>.<tar.gz|zip>`. Releases include both installers and a combined `SHA256SUMS`. Tagged release builds also upload the packages as workflow artifacts. Signing, notarization, Homebrew, and WinGet distribution are not yet configured.
 
 For an executable smoke test after building: `python scripts/smoke-test.py server/target/release/lgtm` (use `lgtm.exe` on Windows). Release packaging and smoke/installer tests require Python 3.11+. CI also tests fresh installs, upgrades, version pinning, and download/checksum failures without contacting a release server.
