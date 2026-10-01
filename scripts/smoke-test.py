@@ -19,7 +19,8 @@ with tempfile.TemporaryDirectory(prefix="lgtm-smoke-") as temporary:
     repo = root / "repo"
     repo.mkdir()
     subprocess.run(["git", "-c", "init.templateDir=", "init", "-q", str(repo)], check=True)
-    (repo / "hello.txt").write_text("hello\n")
+    # Write exact bytes: write_text translates LF to CRLF on Windows.
+    (repo / "hello.txt").write_bytes(b"hello\n")
     env = dict(os.environ, LGTM_RUNTIME_DIR=str(root / "runtime"), LGTM_STATE_DIR=str(root / "state"), LGTM_NO_OPEN="1", LGTM_PORT="0")
     log = (root / "server.log").open("w+")
     server = subprocess.Popen([binary, "serve"], env=env, stdout=log, stderr=log)
@@ -52,7 +53,8 @@ with tempfile.TemporaryDirectory(prefix="lgtm-smoke-") as temporary:
             opened = subprocess.run([binary, "open", str(repo), "--changes"], env=env, capture_output=True, text=True, timeout=10, check=True)
             assert opened.stdout.strip() == info["url"] + "/r/repo/files?changed=1", opened.stdout
         with http.open(info["url"] + "/api/r/repo/contents/hello.txt") as response:
-            assert json.load(response)["new"] == "hello\n"
+            contents = json.load(response)["new"]
+            assert contents == "hello\n", repr(contents)
         duplicate = subprocess.run([binary, "serve"], env=env, capture_output=True, text=True, timeout=10)
         assert duplicate.returncode != 0, "Second server acquired the same lock"
         assert "already running" in duplicate.stderr
