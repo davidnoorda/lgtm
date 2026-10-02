@@ -1,4 +1,7 @@
 import { useEffect, useRef, useState } from "react";
+import { Button } from "./components/ui/Button";
+import { Textarea } from "./components/ui/Textarea";
+import { ChromeHeader } from "./components/ChromeHeader";
 
 type Note = {
   id: string;
@@ -99,36 +102,58 @@ export function Scratch({
       setError("Could not copy feedback.");
     }
   }
+  // Wait for the canonical route before accepting edits; this temporary
+  // component is replaced when /scratch/new gets its document ID.
+  if (id === "new") return <p role="status">Creating scratch document…</p>;
+
   return (
-    <div className="app">
-      <header>
-        <strong>LGTM · Scratch</strong>
-        <span className="repo">Browser-local text annotations</span>
-        <nav className="view-nav" aria-label="Views">
-          <button onClick={onBack}>Back to review</button>
-          <button onClick={onHome}>Repositories</button>
-        </nav>
-        <button
-          onClick={() => {
-            window.history.pushState({}, "", "/scratch/new");
-            window.dispatchEvent(new PopStateEvent("popstate"));
-          }}
+    <div className="flex h-dvh flex-col">
+      <ChromeHeader
+        title="LGTM · Scratch"
+        context="Browser-local text annotations"
+        onHome={onHome}
+        actions={
+          <>
+            <Button variant="ghost" size="sm" onClick={onBack}>
+              Back to review
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                window.history.pushState({}, "", "/scratch/new");
+                window.dispatchEvent(new PopStateEvent("popstate"));
+              }}
+            >
+              New scratch
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={copy}
+              disabled={!doc.notes.length}
+            >
+              Copy feedback ({doc.notes.length})
+            </Button>
+          </>
+        }
+      />
+      {error && (
+        <div
+          role="alert"
+          className="border-b border-border px-4 py-2.5 text-danger"
         >
-          New scratch
-        </button>
-        <button onClick={copy} disabled={!doc.notes.length}>
-          Copy feedback ({doc.notes.length})
-        </button>
-      </header>
-      {error && <div className="error">{error}</div>}
-      <div className="scratch-layout">
-        <main>
-          <p className="hint">
+          {error}
+        </div>
+      )}
+      <div className="grid min-h-0 flex-1 grid-cols-1 overflow-auto md:grid-cols-[minmax(0,1fr)_340px]">
+        <main className="flex min-h-80 flex-col p-4">
+          <p className="mb-3 text-xs text-muted">
             Paste text or Markdown. Highlight any text, then add a comment.
           </p>
-          <textarea
+          <Textarea
             ref={area}
-            className="scratch-text"
+            className="min-h-60 flex-1 font-mono"
             aria-label="Scratch text"
             placeholder="Paste text or Markdown here…"
             value={doc.text}
@@ -143,18 +168,21 @@ export function Scratch({
             }}
           />
         </main>
-        <section className="review">
-          <h3>Text annotations</h3>
+        <section className="border-t border-border p-4 md:overflow-auto md:border-t-0 md:border-l">
+          <h3 className="mb-3 text-base">Text annotations</h3>
           {range && (
-            <div>
-              <blockquote>{doc.text.slice(range.start, range.end)}</blockquote>
-              <textarea
+            <div className="my-3 rounded-md border border-border bg-surface p-3">
+              <blockquote className="my-2.5 max-h-40 overflow-auto border-l-2 border-border pl-2.5 font-mono text-xs whitespace-pre-wrap wrap-anywhere">
+                {doc.text.slice(range.start, range.end)}
+              </blockquote>
+              <Textarea
                 aria-label="Annotation"
                 value={comment}
                 onChange={(e) => setComment(e.target.value)}
                 placeholder="What should change?"
               />
-              <button
+              <Button
+                variant="default"
                 disabled={!comment.trim()}
                 onClick={() => {
                   setDoc((d) => ({
@@ -175,16 +203,23 @@ export function Scratch({
                 }}
               >
                 Add comment
-              </button>
+              </Button>
             </div>
           )}
           {doc.notes.map((n) => (
-            <article key={n.id}>
+            <article
+              key={n.id}
+              className="my-3 rounded-md border border-border bg-surface p-3"
+            >
               {n.detached && (
-                <small>Selected text was edited — annotation detached</small>
+                <small className="text-danger">
+                  Selected text was edited — annotation detached
+                </small>
               )}
-              <blockquote>{n.quote}</blockquote>
-              <textarea
+              <blockquote className="my-2.5 max-h-40 overflow-auto border-l-2 border-border pl-2.5 font-mono text-xs whitespace-pre-wrap wrap-anywhere">
+                {n.quote}
+              </blockquote>
+              <Textarea
                 aria-label="Edit annotation"
                 value={n.text}
                 onChange={(e) =>
@@ -198,7 +233,8 @@ export function Scratch({
                   }))
                 }
               />
-              <button
+              <Button
+                className="mr-2"
                 disabled={n.detached}
                 onClick={() => {
                   area.current?.focus();
@@ -206,8 +242,9 @@ export function Scratch({
                 }}
               >
                 Show selection
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="destructive"
                 onClick={() =>
                   setDoc((d) => ({
                     ...d,
@@ -216,7 +253,7 @@ export function Scratch({
                 }
               >
                 Delete
-              </button>
+              </Button>
             </article>
           ))}
         </section>

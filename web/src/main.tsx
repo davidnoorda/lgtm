@@ -1,12 +1,8 @@
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { File, MultiFileDiff } from "@pierre/diffs/react";
+import "@fontsource-variable/inter";
+import "@fontsource-variable/jetbrains-mono";
 import type {
   DiffLineAnnotation,
   FileContents,
@@ -26,6 +22,17 @@ import {
 import type { Entry, View } from "./repository";
 import "./style.css";
 import { Scratch } from "./Scratch";
+import { Button } from "./components/ui/Button";
+import { ToggleGroup } from "./components/ui/ToggleGroup";
+import { Switch } from "./components/ui/Switch";
+import { ThemeProvider, useTheme } from "./components/theme/ThemeProvider";
+import { ReviewShell } from "./components/ReviewShell";
+import { ChromeHeader, type DisplaySettings } from "./components/ChromeHeader";
+import {
+  DraftAnnotation,
+  SavedAnnotation,
+} from "./components/ReviewAnnotation";
+import { ReviewNotes } from "./components/ReviewNotes";
 
 type Overview = { repo: string; head: string; files: GitStatusEntry[] };
 type Side = "additions" | "deletions";
@@ -57,12 +64,17 @@ function Tree({
   gitStatus,
   selected,
   onSelect,
+  changedOnly,
+  onChangedOnly,
 }: {
   files: Entry[];
   gitStatus: GitStatusEntry[];
   selected: string | null;
   onSelect: (path: string) => void;
+  changedOnly: boolean;
+  onChangedOnly: (value: boolean) => void;
 }) {
+  const { colorScheme } = useTheme();
   const paths = useMemo(() => files.map((f) => f.path), [files]);
   // useFileTree creates its model once and retains the initial callback.
   // Read current props instead of capturing the initial repository view.
@@ -81,10 +93,13 @@ function Tree({
       current.onSelect(path);
   }, []);
   const { model } = useFileTree({
-    paths,
-    gitStatus,
     initialExpansion: "open",
     flattenEmptyDirectories: true,
+    search: true,
+    stickyFolders: true,
+    density: "compact",
+    paths,
+    gitStatus,
     onSelectionChange,
   });
   useEffect(() => {
@@ -106,7 +121,26 @@ function Tree({
       syncing.current = false;
     }
   }, [model, paths, selected]);
-  return <FileTree model={model} />;
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex items-center gap-2 p-3">
+        <label className="flex items-center gap-2 text-xs">
+          <Switch
+            aria-label="Show changed files only"
+            checked={changedOnly}
+            onCheckedChange={onChangedOnly}
+          />
+          Changed only
+        </label>
+        <span className="flex-1 text-xs text-muted">{files.length}</span>
+      </div>
+      <FileTree
+        className="min-h-0 flex-1 overflow-auto"
+        model={model}
+        style={{ colorScheme }}
+      />
+    </div>
+  );
 }
 function navigate(url: string, replace = false) {
   if (`${window.location.pathname}${window.location.search}` === url) return;
@@ -149,7 +183,16 @@ function App({
     null,
   );
   const [text, setText] = useState("");
-  const [style, setStyle] = useState<"unified" | "split">("unified");
+  const [settings, setSettings] = useState<DisplaySettings>(() => ({
+    diffStyle: window.matchMedia("(max-width: 767px)").matches
+      ? "unified"
+      : "split",
+    diffIndicators: "bars",
+    overflow: "scroll",
+    lineNumbers: true,
+    showBackgrounds: true,
+  }));
+  const { colorScheme } = useTheme();
   const current = useRef<View | null>(null);
   useEffect(() => {
     localStorage.setItem(`lgtm-comments:${id}`, JSON.stringify(comments));
@@ -262,6 +305,14 @@ function App({
     () => (view?.new == null ? null : { name: view.path, contents: view.new }),
     [view],
   );
+  const diffFiles =
+    oldFile && newFile
+      ? { oldFile, newFile }
+      : oldFile
+        ? { oldFile, newFile: null }
+        : newFile
+          ? { oldFile: null, newFile }
+          : null;
   const annotations = useMemo<DiffLineAnnotation<Annotation>[]>(
     () => [
       ...comments
@@ -292,55 +343,31 @@ function App({
   const renderAnnotation = useCallback(
     (annotation: DiffLineAnnotation<Annotation>) =>
       annotation.metadata.kind === "draft" ? (
-        <div className="inline-comment draft-comment">
-          <span className="comment-avatar" aria-hidden="true">
-            R
-          </span>
-          <div className="draft-body">
-            <strong>
-              Comment on {draft && location(draft.side, draft.start, draft.end)}
-            </strong>
-            <textarea
-              autoFocus
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              placeholder="What should change?"
-            />
-            <div className="draft-actions">
-              <button
-                onClick={() => {
-                  setDraft(null);
-                  setSelectedRange(null);
-                  setText("");
-                }}
-              >
-                Cancel
-              </button>
-              <button onClick={save} disabled={!text.trim()}>
-                Add comment
-              </button>
-            </div>
-          </div>
-        </div>
+        <DraftAnnotation
+          label={`Comment on ${draft ? location(draft.side, draft.start, draft.end) : "selected lines"}`}
+          value={text}
+          onChange={setText}
+          onCancel={() => {
+            setDraft(null);
+            setSelectedRange(null);
+            setText("");
+          }}
+          onSave={save}
+        />
       ) : (
-        <div className="inline-comment">
-          <span className="comment-avatar" aria-hidden="true">
-            R
-          </span>
-          <div>
-            <strong>Review note</strong>
-            <p>{annotation.metadata.comment.text}</p>
-          </div>
-        </div>
+        <SavedAnnotation text={annotation.metadata.comment.text} />
       ),
     [draft, text, view, overview?.repo],
   );
   const options = useMemo(
     () => ({
-      theme: "pierre-dark" as const,
-      diffStyle: style,
-      unsafeCSS: ":host { --diffs-bg: #101011; }",
-      lineHoverHighlight: "both" as const,
+      themeType: colorScheme,
+      diffStyle: settings.diffStyle,
+      diffIndicators: settings.diffIndicators,
+      overflow: settings.overflow,
+      disableBackground: !settings.showBackgrounds,
+      disableLineNumbers: !settings.lineNumbers,
+      lineHoverHighlight: "number" as const,
       enableLineSelection: !draft,
       enableGutterUtility: !draft,
       onLineSelectionChange: (range: SelectedLineRange | null) =>
@@ -364,7 +391,7 @@ function App({
         setText("");
       },
     }),
-    [style, selected, draft, fileMode],
+    [settings, colorScheme, selected, draft, fileMode],
   );
   function save() {
     if (!view || !draft || !text.trim()) return;
@@ -412,193 +439,117 @@ function App({
     }
   }
   return (
-    <div className="app">
-      <header>
-        <strong>LGTM</strong>
-        <span className="repo">{overview?.repo ?? "Loading repository…"}</span>
-        <nav className="view-nav" aria-label="Views">
-          <button onClick={() => navigate("/")}>Repositories</button>
-          <button onClick={() => navigate("/scratch/new")}>Scratch</button>
-        </nav>
-        <span className="mode">HEAD {overview?.head}</span>
-        <button
-          onClick={copy}
-          disabled={!note.trim() && !reviewComments.length}
-        >
-          Copy feedback ({reviewComments.length})
-        </button>
-      </header>
-      {error && <div className="error">{error}</div>}
-      <div className="layout">
-        <aside>
-          <h3>
-            Files <span>{visibleFiles.length}</span>
-          </h3>
-          <label className="tree-filter">
-            <input
-              type="checkbox"
-              checked={changedOnly}
-              onChange={(e) => setChangedOnly(e.target.checked)}
-            />{" "}
-            Changed only <span>{overview?.files.length ?? 0}</span>
-          </label>
-          <div className="tree">
-            {overview && (
-              <Tree
-                files={visibleFiles}
-                gitStatus={overview.files}
-                selected={selected}
-                onSelect={select}
-              />
-            )}
-          </div>
-        </aside>
-        <main>
-          <div className="filebar">
-            <span>{selected ?? "Select a file"}</span>
-            <div>
-              {isChanged && change.status !== "deleted" && (
-                <>
-                  <button
-                    onClick={() => setFullFile(false)}
-                    aria-pressed={fileMode === "changes"}
-                  >
-                    Diff
-                  </button>
-                  <button
-                    onClick={() => setFullFile(true)}
-                    aria-pressed={fileMode === "files"}
-                  >
-                    Full file
-                  </button>
-                </>
-              )}
-              {fileMode === "changes" && (
-                <>
-                  <button
-                    onClick={() => setStyle("unified")}
-                    aria-pressed={style === "unified"}
-                  >
-                    Unified
-                  </button>
-                  <button
-                    onClick={() => setStyle("split")}
-                    aria-pressed={style === "split"}
-                  >
-                    Split
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
-          {view ? (
-            <>
-              <p className="hint">
-                Click or drag line numbers to select lines and leave a comment.
-              </p>
-              {fileMode === "files" && newFile ? (
-                <File<Annotation>
-                  file={newFile}
-                  options={options}
-                  selectedLines={selectedRange}
-                  lineAnnotations={annotations}
-                  renderAnnotation={(a) =>
-                    renderAnnotation({ ...a, side: "additions" })
-                  }
-                />
-              ) : oldFile && newFile ? (
-                <MultiFileDiff
-                  oldFile={oldFile}
-                  newFile={newFile}
-                  options={options}
-                  selectedLines={selectedRange}
-                  lineAnnotations={annotations}
-                  renderAnnotation={renderAnnotation}
-                />
-              ) : oldFile ? (
-                <MultiFileDiff
-                  oldFile={oldFile}
-                  newFile={null}
-                  options={options}
-                  selectedLines={selectedRange}
-                  lineAnnotations={annotations}
-                  renderAnnotation={renderAnnotation}
-                />
-              ) : newFile ? (
-                <MultiFileDiff
-                  oldFile={null}
-                  newFile={newFile}
-                  options={options}
-                  selectedLines={selectedRange}
-                  lineAnnotations={annotations}
-                  renderAnnotation={renderAnnotation}
-                />
-              ) : null}
-            </>
-          ) : (
-            <div className="empty">
-              {selected ? "Loading file…" : "Select a file to review."}
-            </div>
-          )}
-        </main>
-        <section className="review">
-          <h3>
-            Review notes <span>{reviewComments.length}</span>
-          </h3>
-          <label>
-            Overall note
-            <textarea
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              placeholder="Optional instructions for your agent…"
+    <ReviewShell
+      context={
+        overview
+          ? `${overview.repo} · HEAD ${overview.head}`
+          : "Loading repository…"
+      }
+      onHome={() => navigate("/")}
+      settings={settings}
+      onSettingsChange={setSettings}
+      error={error}
+      commentCount={reviewComments.length}
+      actions={
+        <>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => navigate("/scratch/new")}
+          >
+            Scratch
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={copy}
+            disabled={!note.trim() && !reviewComments.length}
+          >
+            Copy feedback ({reviewComments.length})
+          </Button>
+        </>
+      }
+      files={
+        overview ? (
+          <Tree
+            files={visibleFiles}
+            gitStatus={overview.files}
+            selected={selected}
+            onSelect={select}
+            changedOnly={changedOnly}
+            onChangedOnly={setChangedOnly}
+          />
+        ) : (
+          <p className="p-3 text-xs text-muted">Loading files…</p>
+        )
+      }
+      comments={
+        <ReviewNotes
+          overall={note}
+          onOverallChange={setNote}
+          comments={reviewComments}
+          onEdit={(id, text) =>
+            setComments((cs) =>
+              cs.map((item) => (item.id === id ? { ...item, text } : item)),
+            )
+          }
+          onDelete={(id) =>
+            setComments((cs) => cs.filter((item) => item.id !== id))
+          }
+          onOpen={(comment) =>
+            navigate(
+              repositoryURL(id, comment.path, {
+                fullFile: comment.mode === "files",
+              }),
+            )
+          }
+        />
+      }
+    >
+      <main className="min-h-0 min-w-0 overflow-auto [overflow-anchor:none]">
+        {isChanged && change.status !== "deleted" && (
+          <div className="flex justify-end border-b border-border px-3 py-2">
+            <ToggleGroup
+              label="File view"
+              value={fileMode}
+              options={[
+                { value: "changes", label: "Diff" },
+                { value: "files", label: "Full file" },
+              ]}
+              onChange={(value) => setFullFile(value === "files")}
             />
-          </label>
-          <div className="comments">
-            {reviewComments.map((c) => (
-              <article key={c.id}>
-                <small>
-                  {c.path} · {location(c.side, c.line, c.end ?? c.line)}{" "}
-                  {c.stale && <b>Potentially stale</b>}
-                </small>
-                <blockquote>{c.excerpt}</blockquote>
-                <textarea
-                  value={c.text}
-                  onChange={(e) =>
-                    setComments((cs) =>
-                      cs.map((item) =>
-                        item.id === c.id
-                          ? { ...item, text: e.target.value }
-                          : item,
-                      ),
-                    )
-                  }
-                />
-                <div>
-                  <button
-                    onClick={() =>
-                      navigate(
-                        repositoryURL(id, c.path, {
-                          fullFile: c.mode === "files",
-                        }),
-                      )
-                    }
-                  >
-                    Open file
-                  </button>
-                  <button
-                    onClick={() =>
-                      setComments((cs) => cs.filter((item) => item.id !== c.id))
-                    }
-                  >
-                    Delete
-                  </button>
-                </div>
-              </article>
-            ))}
           </div>
-        </section>
-      </div>
-    </div>
+        )}
+        {view ? (
+          fileMode === "files" && newFile ? (
+            <File<Annotation>
+              file={newFile}
+              options={options}
+              selectedLines={selectedRange}
+              lineAnnotations={annotations}
+              renderAnnotation={(a) =>
+                renderAnnotation({ ...a, side: "additions" })
+              }
+            />
+          ) : diffFiles ? (
+            <MultiFileDiff<Annotation>
+              {...diffFiles}
+              options={options}
+              selectedLines={selectedRange}
+              lineAnnotations={annotations}
+              renderAnnotation={renderAnnotation}
+            />
+          ) : null
+        ) : (
+          <div
+            role="status"
+            className="grid h-full place-items-center text-muted"
+          >
+            {selected ? "Loading file…" : "Select a file to review."}
+          </div>
+        )}
+      </main>
+    </ReviewShell>
   );
 }
 function Home() {
@@ -610,22 +561,42 @@ function Home() {
       .catch((e) => setError(String(e)));
   }, []);
   return (
-    <div className="app">
-      <header>
-        <strong>LGTM</strong>
-        <button onClick={() => navigate("/scratch/new")}>New scratch</button>
-      </header>
-      <main>
-        <h2>Repositories</h2>
-        <p>
+    <div className="min-h-dvh">
+      <ChromeHeader
+        onHome={() => navigate("/")}
+        context="Local repository review"
+        actions={
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => navigate("/scratch/new")}
+          >
+            New scratch
+          </Button>
+        }
+      />
+      <main className="mx-auto w-full max-w-200 space-y-4 p-6">
+        <h2 className="text-lg">Repositories</h2>
+        <p className="text-xs text-muted">
           Register a repository with <code>lgtm open /path/to/repo</code>.
         </p>
-        {error && <p>{error}</p>}
-        {Object.entries(repos).map(([id, path]) => (
-          <p key={id}>
-            <button onClick={() => navigate(`/r/${id}/files`)}>{path}</button>
+        {error && (
+          <p role="alert" className="text-danger">
+            {error}
           </p>
-        ))}
+        )}
+        <div className="flex flex-col items-start gap-2">
+          {Object.entries(repos).map(([id, path]) => (
+            <Button
+              key={id}
+              variant="outline"
+              className="min-w-0 max-w-full justify-start truncate text-left"
+              onClick={() => navigate(`/r/${id}/files`)}
+            >
+              {path}
+            </Button>
+          ))}
+        </div>
       </main>
     </div>
   );
@@ -638,6 +609,8 @@ function Router() {
     const update = () =>
       setUrl(`${window.location.pathname}${window.location.search}`);
     window.addEventListener("popstate", update);
+    // A child may canonicalize its route before this effect subscribes.
+    update();
     return () => window.removeEventListener("popstate", update);
   }, []);
   const lastRepository = useRef(
@@ -662,4 +635,8 @@ function Router() {
     );
   return <Home />;
 }
-createRoot(document.getElementById("root")!).render(<Router />);
+createRoot(document.getElementById("root")!).render(
+  <ThemeProvider>
+    <Router />
+  </ThemeProvider>,
+);
